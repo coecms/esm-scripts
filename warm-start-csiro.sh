@@ -1,24 +1,25 @@
 #!/bin/bash
 
 # Initialise an ACCESS-ESM Payu run from a CSIRO experiment
+# This should be run from the top-level warm-start.sh script, which sets up the $csiro_source etc. environment variables
+
 set -eu
+trap "echo Error in warm_start_csiro.sh" ERR
 
-# Start year of this run - should match config.yaml & the model namelists
-start_year=1850
+echo "Sourcing restarts from ${csiro_source} / year ${source_year}"
 
-# CSIRO job to copy the warm start from
-project=p66
-user=cm2704
-expname=PI-01
-source_year=541
+# Load some helper scripts
+SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+source $SCRIPTDIR/utils.sh
 
-csiro_source=/g/data/$project/$user/archive/$expname/restart
+# Start year of this run - read from config.yaml
+start_year=$(get_payu_start_year)
 
 # =====================================================================
 
 # Setup the restart directory
 payu sweep > /dev/null
-payu setup --archive
+payu setup --archive > /dev/null
 payu_archive=./archive
 
 payu_restart=${payu_archive}/restart000
@@ -35,12 +36,8 @@ mkdir $payu_restart/{atmosphere,ocean,ice,coupler}
 yearstart="$(printf '%04d' $source_year)0101"
 pyearend="$(printf '%04d' $(( source_year - 1 )) )1231"
 
-cp -v $csiro_source/atm/${expname}.astart-${yearstart} $payu_restart/atmosphere/restart_dump.orig
-
-# Setup for land use
-cdo selyear,1851 -chname,fraction,field1391 work/atmosphere/INPUT/cableCMIP6_LC_1850-2015.nc $payu_restart/atmosphere/land_frac.nc
-python scripts/update_cable_vegfrac.py -i $payu_restart/atmosphere/restart_dump.orig -o $payu_restart/atmosphere/restart_dump.astart -f $payu_restart/atmosphere/land_frac.nc -v
-
+# Copy in the restart files from the CSIRO run
+cp -v $csiro_source/atm/${expname}.astart-${yearstart} $payu_restart/atmosphere/restart_dump.astart
 
 for f in $csiro_source/cpl/*-${pyearend}; do
     cp -v $f $payu_restart/coupler/$(basename ${f%-*})
@@ -55,7 +52,8 @@ for f in $csiro_source/ice/*-${pyearend}; do
 done
 cp -v $csiro_source/ice/iced.${yearstart} $payu_restart/ice/
 
-scripts/set_restart_year.sh $start_year
+# Set the year of each model component to the run start year
+$SCRIPTDIR/set_restart_year.sh $start_year
 
-# Cleanup
+# Cleanup to be ready to run the model
 payu sweep
